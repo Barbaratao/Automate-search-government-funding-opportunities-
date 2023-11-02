@@ -1,9 +1,81 @@
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.keys import Keys
+import datetime
+import os
+import pandas as pd
+import time
 import requests
 from bs4 import BeautifulSoup
 import json
 import pandas as pd
 import os
 import re
+#######################################################
+#download NIH funding opportunity 
+#######################################################
+# Initialize Chrome options
+chrome_options = Options()
+# Use ChromeDriverManager to get the ChromeDriver path
+driver_path = ChromeDriverManager().install()
+
+# Create a service object with the driver path
+service = Service(driver_path)
+
+driver = webdriver.Chrome(service=service, options=chrome_options.add_argument('--headless'))
+
+driver.get("https://www.grants.gov/web/grants/search-grants.html")
+time.sleep(10)
+driver.switch_to.frame(driver.find_element(By.XPATH, "//*[@id='embeddedIframe']"))
+driver.find_element(By.XPATH, "/html/body/table[1]/tbody/tr/td[3]/table[2]/tbody/tr[1]/td/a[2]").click()
+time.sleep(10)
+# Specify the directory where the downloaded files are located
+download_directory = "C:\\Users\\Jun Tao\\Downloads\\"
+
+# List all files in the directory and sort by modification time (newest first)
+files = os.listdir(download_directory)
+files.sort(key=lambda x: os.path.getmtime(os.path.join(download_directory, x)), reverse=True)
+file_name = download_directory + files[0]
+
+
+
+# Loop the data lines
+with open(file_name, encoding='ISO-8859-1') as temp_f:
+# get No of columns in each line
+    col_count = [len(l.split(",")) for l in temp_f.readlines()]
+
+# Generate column names (names will be 0, 1, 2, ..., maximum columns - 1)
+column_names = [i for i in range(0, max(col_count))]
+
+grant = pd.read_csv(file_name, sep=',', header=None, names=column_names)
+
+grant.dropna(axis=1, how='all', inplace=True)
+
+# Set the first row as the column names
+grant.columns = grant.iloc[0]
+
+# Drop the first row (which is now redundant)
+grant = grant[1:]
+
+# Reset the index after dropping the first-row
+grant.reset_index(drop=True, inplace=True)
+
+def extract_string_from_hyperlink(hyperlink):
+# Split the string using the comma as a delimiter and return the second part
+    parts = hyperlink.split(',')
+    if len(parts) > 1:
+        return parts[1]
+    else:
+        return hyperlink
+
+# Apply the custom function to the column containing the hyperlinks
+grant['OPPORTUNITY NUMBER'] = grant['OPPORTUNITY NUMBER'].apply(extract_string_from_hyperlink).str.replace(r'["\)]', '', regex=True)
 
 
 # Update the run_date and design to run every other week
@@ -22,6 +94,12 @@ keywords=["xx","xx"]
 #set negative keywords to exclude funding opportunities
 negative_keywords=["xx","xx"]
 
+################################################################################################################
+#select related funding opportunities 
+#scraping funding opportunities from the NIH funding webpage 
+#check similarity with research profile
+#return top five funding opportunities 
+################################################################################################################
 
 #function to select_grant 
 
@@ -41,10 +119,10 @@ def select_grants(df, keywords, negative_keywords):
     return final_df
 
 final_df=select_grants(df,keywords, negative_keywords)
-#call the function and return the dataframe with funding opportunities meet your requirement
+#call the function and return the dataframe with funding opportunities to meet your requirement
 final_df.info()
 
-#function to scrape the funding oppourtunity purpose
+#function to scrape the funding opportunity purpose
 
 def scrape_nih_grants_data(opportunity_numbers):
     # Create an empty DataFrame to store the results
