@@ -30,65 +30,77 @@ service = Service(driver_path)
 
 driver = webdriver.Chrome(service=service, options=chrome_options.add_argument('--headless'))
 
-driver.get("https://www.grants.gov/web/grants/search-grants.html")
-time.sleep(10)
-driver.switch_to.frame(driver.find_element(By.XPATH, "//*[@id='embeddedIframe']"))
-driver.find_element(By.XPATH, "/html/body/table[1]/tbody/tr/td[3]/table[2]/tbody/tr[1]/td/a[2]").click()
-time.sleep(10)
-# Specify the directory where the downloaded files are located
-download_directory = "C:\\Users\\Jun Tao\\Downloads\\"
 
-# List all files in the directory and sort by modification time (newest first)
-files = os.listdir(download_directory)
-files.sort(key=lambda x: os.path.getmtime(os.path.join(download_directory, x)), reverse=True)
-file_name = download_directory + files[0]
+driver.get("https://www.grants.gov/search-grants.html")
 
+# Wait for the <select> element by its ID for "Posted Date Range" to be present
+wait = WebDriverWait(driver, 10)
+dropdown = wait.until(EC.presence_of_element_located((By.ID, 'dateRange')))
 
+# Wrap the WebElement in a Select object
+select_element = Select(dropdown)
+dropdown.click()
+time.sleep(5)
+# Select the option by visible text
+#select_element.select_by_visible_text("Posted Date - Last 2 Weeks")
+select_element.select_by_value("14")
+# Find and click the "Update Date Range" button
+update_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[text()='Update Date Range']")))
+update_button.click()
 
-# Loop the data lines
-with open(file_name, encoding='ISO-8859-1') as temp_f:
-# get No of columns in each line
-    col_count = [len(l.split(",")) for l in temp_f.readlines()]
+# Step 1: Wait for the page to load new content
+time.sleep(5)  # Adjust the sleep time as needed based on the page's response time
 
-# Generate column names (names will be 0, 1, 2, ..., maximum columns - 1)
-column_names = [i for i in range(0, max(col_count))]
+data = []
 
-grant = pd.read_csv(file_name, sep=',', header=None, names=column_names)
+while True:
+    try:
+        # Wait for the table to be visible\
+        table_class = "usa-table usa-table--stacked usa-table--compact margin-0 width-full usa-table--striped margin-top-2"
+        WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.CLASS_NAME, table_class.replace(" ", "."))))
+        table = driver.find_element(By.CLASS_NAME, table_class.replace(" ", "."))
+        rows = table.find_elements(By.TAG_NAME, 'tr')
 
-grant.dropna(axis=1, how='all', inplace=True)
+        for row in rows:
+            cols = row.find_elements(By.TAG_NAME, 'td')
+            row_data = [col.text for col in cols]
+            # Assuming the href is in the first column, modify as needed
+            href_element = cols[0].find_element(By.TAG_NAME, 'a') if cols else None
+            href = href_element.get_attribute('href') if href_element else None
+            row_data.append(href)
+            data.append(row_data)
 
-# Set the first row as the column names
-grant.columns = grant.iloc[0]
+        # Find the 'Next' button
+        next_button = driver.find_element(By.XPATH, "//span[contains(@class, 'usa-pagination__link-text') and contains(text(), 'Next')]")
 
-# Drop the first row (which is now redundant)
-grant = grant[1:]
+        # Check if the 'Next' button is enabled
+        if 'disabled' in next_button.get_attribute('class'):
+            break
 
-# Reset the index after dropping the first-row
-grant.reset_index(drop=True, inplace=True)
+        # Click the 'Next' button
+        next_button.click()
 
-def extract_string_from_hyperlink(hyperlink):
-# Split the string using the comma as a delimiter and return the second part
-    parts = hyperlink.split(',')
-    if len(parts) > 1:
-        return parts[1]
-    else:
-        return hyperlink
+    except NoSuchElementException:
+        print("No more pages or the 'Next' button is not found.")
+        break
+    except TimeoutException:
+        print("Timed out waiting for the page to load.")
+        break
+    finally:
+        # Close the browser
+        driver.quit()
 
-# Apply the custom function to the column containing the hyperlinks
-grant['OPPORTUNITY NUMBER'] = grant['OPPORTUNITY NUMBER'].apply(extract_string_from_hyperlink).str.replace(r'["\)]', '', regex=True)
+# Filter out rows that are empty lists
+grant = pd.DataFrame(data)
+grant=grant.dropna(how="any")
+# Filter out rows that are empty lists 
+# Get the name of the last column
+last_column = grant.columns[-2]
 
+# Drop the last column
+grant = grant.drop(columns=[last_column]) 
+grant.columns=["OPPORTUNITY NUMBER","OPPORTUNITY TITLE", "AGENCY NAME","STATUS", "POST DATE","URL"]
 
-# Update the run_date and design to run every other week
-run_date = datetime.datetime(2022, 1, 1)
-grant["POSTED DATE"]=pd.to_datetime(grant["POSTED DATE"])
-grant["CLOSE DATE"]=pd.to_datetime(grant["CLOSE DATE"])
-#only select grant opportunities that posted after the previous run_date
-df=grant[grant["POSTED DATE"]>run_date]
-
-#set up the due date
-due_date=datetime.datetime(2024,1,1)
-#only show the funding opportunities that expired after the due_date. 
-df=df[df["CLOSE DATE"]>due_date]
 #set keywords for selection, add your own keywords
 keywords=["xx","xx"]
 #set negative keywords to exclude funding opportunities
